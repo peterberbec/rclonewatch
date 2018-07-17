@@ -1,3 +1,17 @@
+# First, this will not function as is. It's part of a much bigger script.
+# rclone_watch() is called from upload() so head down there now
+printf_ds() # save the cursor position, print the date and passed value
+{
+        printf "\033[s$(date +"%Y/%m/%d %T") - $*"
+}
+printf_du() # move the cursor to previously set positition, print the date and passed value.
+{
+        printf "\033[u$(date +"%Y/%m/%d %T") - $*"
+}
+printf_d() # print the date and passed value
+{
+        printf "$(date +"%Y/%m/%d %T") - $*"
+}
 rclone_watch()
 {
 	PID=$!
@@ -58,25 +72,35 @@ rclone_watch()
 		printf "\033[K"
 	fi
 }
+# Upload is passed a directory. We are going to upload that directory to my gdrive
 upload()
 {
-target="$1"
+	target="$1"
 	if ! [ -e "$target" ]
 	then
 		printf_d "\"$target\" doesn't exist."
-		clean_up
+		clean_up	# clean_up is a function that removes temp files etc.
 	fi
-	start_secs=$(date +%s)
-	check_mounts
+	start_secs=$(date +%s)	# for timekeeping
+	check_mounts		# check_mounts is a function that makes sure the directories are mounted. I got burned badly once
+				# by my mountpoint failing mid-upload. rclone silently deleted all the files because that's what I told
+				# it to do.
 	dest="$1"
-	printf_ds "raid_6:/$target counting files..."
-		rclone -xq --skip-links $rclone_depth_limit size "$target" >> "$temp" 2> /dev/null &
-		wait_for count files in $target
-		total_files=$(tail -n2 "$temp" | head -n1 | awk '{ print $3 }')
-		total_data=$(tail -n1 "$temp" | awk '{ printf "%.1f%c", $3, $4 }')
-	printf_du "raid_6:/$target $total_files files, $total_data\033[K\n"
+	printf_ds "raid_6:/$target counting files..."	# printf_d, printf_ds and printf_du are a pair of printing scripts.
+							# printf_d prints the date then the line
+							# printf_ds sets the cursor position and prints the date and line
+							# printf_du moves the cursor the the position set by printf_ds,
+							# then prints the date and line.
+		rclone -xq --skip-links $rclone_depth_limit size "$target" >> "$temp" 2> /dev/null & # find the number of files in our local copy
+		wait_for count files in $target # wrapper function for wait. This way I know if the script dies
+		total_files=$(tail -n2 "$temp" | head -n1 | awk '{ print $3 }')	# parse output of rclone above
+		total_data=$(tail -n1 "$temp" | awk '{ printf "%.1f%c", $3, $4 }') # parse part 2.
+	printf_du "raid_6:/$target $total_files files, $total_data\033[K\n" # we now know the size of the local files.
+	# now let's do the upload
 	rclone $sync $exclude -x --stats-log-level NOTICE --skip-links $rclone_depth_limit --stats ${update_time}s --checkers $checkers --transfers $transfers "$target" "$cloud_dest:$dest" >> "$temp" 2>&1 &
+	# head up to the top now, see you in a bit.
 	rclone_watch
+	# welcome back
 	printf_du "${files_trans} files, ${trans_data}@${trans_data_rate} transferred in $(date -d @$((cur_secs-start_secs)) -u +%T).\033[K\n"
 	printf_ds "$cloud_dest:/$target counting files..."
 		rclone -xq --skip-links $rclone_depth_limit size "$cloud_dest:$target" >> "$temp" 2> /dev/null &
